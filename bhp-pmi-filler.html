@@ -240,8 +240,9 @@ function readFile(file) {
 
 // ─── PDF.js scanning ───
 async function scanPdf(bytes) {
-  const cleanBytes = ensurePdfHeader(bytes);
-  const pdf = await pdfjsLib.getDocument({ data: cleanBytes }).promise;
+  // pdf.js detaches the ArrayBuffer, so pass a copy
+  const copy = new Uint8Array(bytes);
+  const pdf = await pdfjsLib.getDocument({ data: copy }).promise;
   const pages = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
@@ -390,11 +391,10 @@ function ensurePdfHeader(bytes, logFn) {
 }
 
 async function fillPdf(targetBytes, targetScan, wrVals, iVals, nameVal, signVal, dateVal, logFn) {
-  const cleanBytes = ensurePdfHeader(targetBytes, logFn);
-  if (logFn) logFn('Loading PDF with pdf-lib (' + cleanBytes.length + ' bytes)...');
-  // Try loading as ArrayBuffer copy (pdf-lib can be picky about typed array views)
-  const buffer = cleanBytes.buffer.slice(cleanBytes.byteOffset, cleanBytes.byteOffset + cleanBytes.byteLength);
-  const pdfDoc = await PDFDocument.load(buffer, {
+  // Make a fresh copy in case the original buffer was detached by pdf.js
+  const freshBytes = new Uint8Array(targetBytes);
+  if (logFn) logFn('Loading PDF with pdf-lib (' + freshBytes.length + ' bytes)...');
+  const pdfDoc = await PDFDocument.load(freshBytes, {
     ignoreEncryption: true,
     updateMetadata: false,
     throwOnInvalidObject: false
