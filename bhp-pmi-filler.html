@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BHP PMI Form Filler</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0e1018; color: #e0e0e0; min-height: 100vh;
+  display: flex; flex-direction: column; align-items: center; padding: 20px;
+}
+h1 { color: #ff6b1a; font-size: 1.5rem; margin-bottom: 4px; }
+.subtitle { color: #888; font-size: 0.85rem; margin-bottom: 20px; }
+.container { width: 100%; max-width: 900px; }
+
+/* Tabs */
+.tabs { display: flex; gap: 4px; margin-bottom: 20px; }
+.tab {
+  flex: 1; padding: 12px; text-align: center; background: #161922;
+  border: 1px solid #2a2d3a; border-radius: 8px 8px 0 0; cursor: pointer;
+  color: #888; font-weight: 600; transition: all 0.2s;
+}
+.tab.active { background: #1e2130; color: #ff6b1a; border-bottom-color: #1e2130; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Drop zones */
+.drop-row { display: flex; gap: 16px; margin-bottom: 16px; }
+.drop-zone {
+  flex: 1; border: 2px dashed #2a2d3a; border-radius: 12px; padding: 30px 16px;
+  text-align: center; cursor: pointer; transition: all 0.2s; background: #161922;
+  min-height: 140px; display: flex; flex-direction: column; align-items: center;
+  justify-content: center;
+}
+.drop-zone:hover, .drop-zone.dragover { border-color: #ff6b1a; background: #1a1520; }
+.drop-zone.loaded { border-color: #4caf50; border-style: solid; }
+.drop-zone .icon { font-size: 2rem; margin-bottom: 8px; }
+.drop-zone .label { font-weight: 600; color: #ccc; margin-bottom: 4px; }
+.drop-zone .hint { font-size: 0.75rem; color: #666; }
+.drop-zone .filename { font-size: 0.8rem; color: #4caf50; margin-top: 6px; word-break: break-all; }
+.single-drop { max-width: 500px; margin: 0 auto 16px; }
+
+/* Cards */
+.card {
+  background: #161922; border-radius: 12px; padding: 20px;
+  margin-bottom: 16px; border: 1px solid #2a2d3a;
+}
+.card h3 { color: #ff6b1a; font-size: 0.95rem; margin-bottom: 12px; }
+
+/* Summary */
+.summary { display: flex; flex-wrap: wrap; gap: 10px; }
+.stat {
+  background: #1e2130; padding: 8px 14px; border-radius: 8px; font-size: 0.85rem;
+}
+.stat .num { color: #ff6b1a; font-weight: 700; }
+.warning { color: #ffab40; font-size: 0.8rem; margin-top: 8px; }
+
+/* Fields */
+.fields { display: flex; flex-wrap: wrap; gap: 12px; }
+.field { flex: 1; min-width: 140px; }
+.field label { display: block; font-size: 0.75rem; color: #888; margin-bottom: 4px; }
+.field input {
+  width: 100%; padding: 8px 10px; background: #1e2130; border: 1px solid #2a2d3a;
+  border-radius: 6px; color: #e0e0e0; font-size: 0.9rem;
+}
+.field input:focus { outline: none; border-color: #ff6b1a; }
+
+/* Buttons */
+.btn {
+  display: block; width: 100%; padding: 14px; border: none; border-radius: 10px;
+  font-size: 1rem; font-weight: 700; cursor: pointer; transition: all 0.2s;
+  margin-top: 8px;
+}
+.btn-primary { background: #ff6b1a; color: #fff; }
+.btn-primary:hover { background: #ff8a4c; }
+.btn-primary:disabled { background: #3a3a3a; color: #666; cursor: not-allowed; }
+
+/* Log */
+.log {
+  background: #0a0c12; border-radius: 8px; padding: 12px; margin-top: 12px;
+  font-size: 0.78rem; color: #888; max-height: 120px; overflow-y: auto;
+  font-family: monospace; display: none;
+}
+.log.visible { display: block; }
+
+@media (max-width: 600px) {
+  .drop-row { flex-direction: column; }
+  body { padding: 12px; }
+}
+</style>
+</head>
+<body>
+
+<h1>BHP PMI Form Filler</h1>
+<p class="subtitle">Auto-fill Preventive Maintenance Instruction forms</p>
+
+<div class="container">
+  <div class="tabs">
+    <div class="tab active" data-tab="copy">Copy from Filled PDF</div>
+    <div class="tab" data-tab="fresh">Fresh Fill</div>
+  </div>
+
+  <!-- TAB 1: Copy Mode -->
+  <div id="tab-copy" class="tab-content active">
+    <div class="drop-row">
+      <div class="drop-zone" id="dz-filled">
+        <div class="icon">📄</div>
+        <div class="label">Filled PDF</div>
+        <div class="hint">Completed form to copy from</div>
+        <div class="filename" id="fn-filled"></div>
+        <input type="file" accept=".pdf" hidden>
+      </div>
+      <div class="drop-zone" id="dz-blank">
+        <div class="icon">📄</div>
+        <div class="label">Blank PDF</div>
+        <div class="hint">New form to fill</div>
+        <div class="filename" id="fn-blank"></div>
+        <input type="file" accept=".pdf" hidden>
+      </div>
+    </div>
+
+    <div class="card" id="copy-summary" style="display:none">
+      <h3>Scan Summary</h3>
+      <div class="summary" id="copy-stats"></div>
+      <div class="warning" id="copy-warning"></div>
+    </div>
+
+    <div class="card" id="copy-fields" style="display:none">
+      <h3>Extracted Values (editable)</h3>
+      <div class="fields">
+        <div class="field">
+          <label>Initials</label>
+          <input type="text" id="copy-initials" value="">
+        </div>
+        <div class="field">
+          <label>Full Name</label>
+          <input type="text" id="copy-name" value="">
+        </div>
+        <div class="field">
+          <label>Sign</label>
+          <input type="text" id="copy-sign" value="">
+        </div>
+      </div>
+    </div>
+
+    <button class="btn btn-primary" id="btn-copy" disabled>Copy &amp; Download</button>
+    <div class="log" id="log-copy"></div>
+  </div>
+
+  <!-- TAB 2: Fresh Fill Mode -->
+  <div id="tab-fresh" class="tab-content">
+    <div class="drop-zone single-drop" id="dz-fresh">
+      <div class="icon">📄</div>
+      <div class="label">Upload Blank PDF</div>
+      <div class="hint">Drop or browse for a blank PMI form</div>
+      <div class="filename" id="fn-fresh"></div>
+      <input type="file" accept=".pdf" hidden>
+    </div>
+
+    <div class="card" id="fresh-summary" style="display:none">
+      <h3>Scan Summary</h3>
+      <div class="summary" id="fresh-stats"></div>
+    </div>
+
+    <div class="card">
+      <h3>Fill Values</h3>
+      <div class="fields">
+        <div class="field">
+          <label>WR Value</label>
+          <input type="text" id="fresh-wr" value="N">
+        </div>
+        <div class="field">
+          <label>Initials</label>
+          <input type="text" id="fresh-initials" value="AM">
+        </div>
+        <div class="field">
+          <label>Full Name</label>
+          <input type="text" id="fresh-name" value="Ashleigh Mason">
+        </div>
+        <div class="field">
+          <label>Sign</label>
+          <input type="text" id="fresh-sign" value="A Mason">
+        </div>
+      </div>
+    </div>
+
+    <button class="btn btn-primary" id="btn-fresh" disabled>Fill &amp; Download</button>
+    <div class="log" id="log-fresh"></div>
+  </div>
+</div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const { PDFDocument, StandardFonts, rgb } = PDFLib;
+
+// ─── State ───
+const state = {
+  filledBytes: null, filledName: '',
+  blankBytes: null, blankName: '',
+  freshBytes: null, freshName: '',
+  filledScan: null, blankScan: null, freshScan: null
+};
+
+// ─── Tab switching ───
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+  });
+});
+
+// ─── Drop zone wiring ───
+function wireDropZone(dzEl, onFile) {
+  const input = dzEl.querySelector('input[type=file]');
+  dzEl.addEventListener('click', () => input.click());
+  dzEl.addEventListener('dragover', e => { e.preventDefault(); dzEl.classList.add('dragover'); });
+  dzEl.addEventListener('dragleave', () => dzEl.classList.remove('dragover'));
+  dzEl.addEventListener('drop', e => {
+    e.preventDefault(); dzEl.classList.remove('dragover');
+    if (e.dataTransfer.files.length) onFile(e.dataTransfer.files[0]);
+  });
+  input.addEventListener('change', () => { if (input.files.length) onFile(input.files[0]); });
+}
+
+function readFile(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(new Uint8Array(r.result));
+    r.onerror = rej;
+    r.readAsArrayBuffer(file);
+  });
+}
+
+// ─── PDF.js scanning ───
+async function scanPdf(bytes) {
+  const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+  const pages = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    pages.push({ pageNum: i, items: content.items });
+  }
+  return analysePages(pages);
+}
+
+function analysePages(pages) {
+  const wrBoxes = [];   // { page, x, y, width, height }
+  const iBoxes = [];    // { page, x, y, width, height }
+  const signoffs = [];  // { page, name: {x,y}, sign: {x,y}, date: {x,y} }
+  const wrValues = [];  // extracted filled values
+  const iValues = [];
+  const signoffValues = { name: '', sign: '', date: '' };
+
+  for (const pg of pages) {
+    const items = pg.items;
+    const pageWR = [];
+    const pageI = [];
+
+    // Find WR and I template boxes
+    for (const item of items) {
+      const x = item.transform[4];
+      const y = item.transform[5];
+      const w = item.width;
+      const h = item.height;
+      if (item.str === 'WR' && x > 490) {
+        pageWR.push({ page: pg.pageNum, x, y, width: w, height: h });
+      }
+      if (item.str === 'I' && x > 490) {
+        pageI.push({ page: pg.pageNum, x, y, width: w, height: h });
+      }
+    }
+
+    // Sort by y descending (top to bottom on page) then x ascending
+    pageWR.sort((a, b) => b.y - a.y || a.x - b.x);
+    pageI.sort((a, b) => b.y - a.y || a.x - b.x);
+
+    // Extract filled values near WR boxes
+    for (const box of pageWR) {
+      wrBoxes.push(box);
+      let found = '';
+      for (const item of items) {
+        const ix = item.transform[4];
+        const iy = item.transform[5];
+        if (item.str !== 'WR' && item.str.trim() !== '' &&
+            Math.abs(ix - box.x) < 15 && Math.abs(iy - box.y) < 15) {
+          found = item.str.trim();
+          break;
+        }
+      }
+      wrValues.push(found);
+    }
+
+    // Extract filled values near I boxes
+    for (const box of pageI) {
+      iBoxes.push(box);
+      let found = '';
+      for (const item of items) {
+        const ix = item.transform[4];
+        const iy = item.transform[5];
+        if (item.str !== 'I' && item.str.trim() !== '' &&
+            Math.abs(ix - box.x) < 15 && Math.abs(iy - box.y) < 15) {
+          found = item.str.trim();
+          break;
+        }
+      }
+      iValues.push(found);
+    }
+
+    // Detect sign-off rows
+    const nameLabels = items.filter(i => i.str.includes('Name:'));
+    const signLabels = items.filter(i => i.str.includes('Sign:'));
+    const dateLabels = items.filter(i => i.str.includes('Date:'));
+
+    for (const nl of nameLabels) {
+      const ny = nl.transform[5];
+      const sl = signLabels.find(s => Math.abs(s.transform[5] - ny) < 5);
+      const dl = dateLabels.find(d => Math.abs(d.transform[5] - ny) < 5);
+      if (sl && dl) {
+        const so = {
+          page: pg.pageNum,
+          name: { x: nl.transform[4], y: ny, width: nl.width },
+          sign: { x: sl.transform[4], y: sl.transform[5], width: sl.width },
+          date: { x: dl.transform[4], y: dl.transform[5], width: dl.width }
+        };
+        signoffs.push(so);
+
+        // Extract filled sign-off values (text to the right of each label on same y)
+        for (const item of items) {
+          const ix = item.transform[4];
+          const iy = item.transform[5];
+          if (Math.abs(iy - ny) < 5 && ix > nl.transform[4] + nl.width - 2 && ix < nl.transform[4] + nl.width + 120) {
+            const val = item.str.trim();
+            if (val && val !== 'Name:' && val !== 'Sign:' && val !== 'Date:') {
+              if (!signoffValues.name) signoffValues.name = val;
+            }
+          }
+          if (sl && Math.abs(iy - sl.transform[5]) < 5 && ix > sl.transform[4] + sl.width - 2 && ix < sl.transform[4] + sl.width + 120) {
+            const val = item.str.trim();
+            if (val && val !== 'Name:' && val !== 'Sign:' && val !== 'Date:') {
+              if (!signoffValues.sign) signoffValues.sign = val;
+            }
+          }
+          if (dl && Math.abs(iy - dl.transform[5]) < 5 && ix > dl.transform[4] + dl.width - 2 && ix < dl.transform[4] + dl.width + 120) {
+            const val = item.str.trim();
+            if (val && val !== 'Name:' && val !== 'Sign:' && val !== 'Date:') {
+              if (!signoffValues.date) signoffValues.date = val;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return { wrBoxes, iBoxes, signoffs, wrValues, iValues, signoffValues };
+}
+
+// ─── pdf-lib writing ───
+function todayStr() {
+  const d = new Date();
+  return String(d.getDate()).padStart(2, '0') + '/' +
+         String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear();
+}
+
+async function fillPdf(targetBytes, targetScan, wrVals, iVals, nameVal, signVal, dateVal) {
+  const pdfDoc = await PDFDocument.load(targetBytes);
+  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const fontItalic = await pdfDoc.embedFont(StandardFonts.HelveticaOblique);
+  const fontSize = 8;
+  const black = rgb(0, 0, 0);
+
+  const pages = pdfDoc.getPages();
+
+  // Fill WR boxes
+  for (let i = 0; i < targetScan.wrBoxes.length; i++) {
+    const box = targetScan.wrBoxes[i];
+    const val = (i < wrVals.length && wrVals[i]) ? wrVals[i] : '';
+    if (!val) continue;
+    const page = pages[box.page - 1];
+    const tw = fontBold.widthOfTextAtSize(val, fontSize);
+    const cx = box.x + (box.width / 2);
+    page.drawText(val, { x: cx - tw / 2, y: box.y, size: fontSize, font: fontBold, color: black });
+  }
+
+  // Fill I boxes
+  for (let i = 0; i < targetScan.iBoxes.length; i++) {
+    const box = targetScan.iBoxes[i];
+    const val = (i < iVals.length && iVals[i]) ? iVals[i] : '';
+    if (!val) continue;
+    const page = pages[box.page - 1];
+    const tw = fontBold.widthOfTextAtSize(val, fontSize);
+    const cx = box.x + (box.width / 2);
+    page.drawText(val, { x: cx - tw / 2, y: box.y, size: fontSize, font: fontBold, color: black });
+  }
+
+  // Fill sign-off rows
+  for (const so of targetScan.signoffs) {
+    const page = pages[so.page - 1];
+    if (nameVal) {
+      page.drawText(nameVal, {
+        x: so.name.x + so.name.width + 4, y: so.name.y,
+        size: fontSize, font: fontRegular, color: black
+      });
+    }
+    if (signVal) {
+      page.drawText(signVal, {
+        x: so.sign.x + so.sign.width + 4, y: so.sign.y,
+        size: fontSize, font: fontItalic, color: black
+      });
+    }
+    if (dateVal) {
+      page.drawText(dateVal, {
+        x: so.date.x + so.date.width + 4, y: so.date.y,
+        size: fontSize, font: fontRegular, color: black
+      });
+    }
+  }
+
+  return await pdfDoc.save();
+}
+
+function download(bytes, filename) {
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function log(id, msg) {
+  const el = document.getElementById(id);
+  el.classList.add('visible');
+  el.textContent += msg + '\n';
+  el.scrollTop = el.scrollHeight;
+}
+
+// ─── Copy Mode ───
+wireDropZone(document.getElementById('dz-filled'), async file => {
+  state.filledBytes = await readFile(file);
+  state.filledName = file.name;
+  document.getElementById('fn-filled').textContent = file.name;
+  document.getElementById('dz-filled').classList.add('loaded');
+  log('log-copy', 'Scanning filled PDF...');
+  state.filledScan = await scanPdf(state.filledBytes);
+  log('log-copy', `Filled: ${state.filledScan.wrBoxes.length} WR, ${state.filledScan.iBoxes.length} I boxes`);
+  updateCopySummary();
+});
+
+wireDropZone(document.getElementById('dz-blank'), async file => {
+  state.blankBytes = await readFile(file);
+  state.blankName = file.name;
+  document.getElementById('fn-blank').textContent = file.name;
+  document.getElementById('dz-blank').classList.add('loaded');
+  log('log-copy', 'Scanning blank PDF...');
+  state.blankScan = await scanPdf(state.blankBytes);
+  log('log-copy', `Blank: ${state.blankScan.wrBoxes.length} WR, ${state.blankScan.iBoxes.length} I boxes`);
+  updateCopySummary();
+});
+
+function updateCopySummary() {
+  if (!state.filledScan || !state.blankScan) return;
+
+  const fs = state.filledScan;
+  const bs = state.blankScan;
+  const filledWR = fs.wrValues.filter(v => v).length;
+  const filledI = fs.iValues.filter(v => v).length;
+
+  document.getElementById('copy-stats').innerHTML =
+    `<div class="stat"><span class="num">${filledWR}</span> WR values extracted</div>` +
+    `<div class="stat"><span class="num">${filledI}</span> Initial values extracted</div>` +
+    `<div class="stat"><span class="num">${bs.wrBoxes.length}</span> WR targets on blank</div>` +
+    `<div class="stat"><span class="num">${bs.iBoxes.length}</span> I targets on blank</div>` +
+    `<div class="stat">${fs.signoffs.length > 0 ? 'Sign-off detected' : 'No sign-off'}</div>`;
+
+  let warn = '';
+  if (fs.wrBoxes.length !== bs.wrBoxes.length)
+    warn += `WR box count mismatch (filled: ${fs.wrBoxes.length}, blank: ${bs.wrBoxes.length}). `;
+  if (fs.iBoxes.length !== bs.iBoxes.length)
+    warn += `Initial box count mismatch (filled: ${fs.iBoxes.length}, blank: ${bs.iBoxes.length}). `;
+  document.getElementById('copy-warning').textContent = warn;
+
+  // Pre-fill editable fields from extracted values
+  const initials = fs.iValues.find(v => v) || 'AM';
+  document.getElementById('copy-initials').value = initials;
+  document.getElementById('copy-name').value = fs.signoffValues.name || 'Ashleigh Mason';
+  document.getElementById('copy-sign').value = fs.signoffValues.sign || 'A Mason';
+
+  document.getElementById('copy-summary').style.display = '';
+  document.getElementById('copy-fields').style.display = '';
+  document.getElementById('btn-copy').disabled = false;
+}
+
+document.getElementById('btn-copy').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-copy');
+  btn.disabled = true;
+  btn.textContent = 'Processing...';
+
+  try {
+    const fs = state.filledScan;
+    const bs = state.blankScan;
+    const initials = document.getElementById('copy-initials').value;
+    const nameVal = document.getElementById('copy-name').value;
+    const signVal = document.getElementById('copy-sign').value;
+    const dateVal = todayStr();
+
+    // Build WR values array: use extracted or fallback to 'N'
+    const wrVals = [];
+    for (let i = 0; i < bs.wrBoxes.length; i++) {
+      wrVals.push(i < fs.wrValues.length && fs.wrValues[i] ? fs.wrValues[i] : 'N');
+    }
+
+    // Build I values: override all with user-specified initials
+    const iVals = [];
+    for (let i = 0; i < bs.iBoxes.length; i++) {
+      iVals.push(initials);
+    }
+
+    const result = await fillPdf(state.blankBytes, bs, wrVals, iVals, nameVal, signVal, dateVal);
+    const outName = state.blankName.replace(/\.pdf$/i, '_filled.pdf');
+    download(result, outName);
+    log('log-copy', 'Done! Downloaded: ' + outName);
+  } catch (e) {
+    log('log-copy', 'Error: ' + e.message);
+    console.error(e);
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Copy & Download';
+});
+
+// ─── Fresh Fill Mode ───
+wireDropZone(document.getElementById('dz-fresh'), async file => {
+  state.freshBytes = await readFile(file);
+  state.freshName = file.name;
+  document.getElementById('fn-fresh').textContent = file.name;
+  document.getElementById('dz-fresh').classList.add('loaded');
+  log('log-fresh', 'Scanning PDF...');
+  state.freshScan = await scanPdf(state.freshBytes);
+  const s = state.freshScan;
+  const tasks = Math.max(s.wrBoxes.length, s.iBoxes.length);
+  document.getElementById('fresh-stats').innerHTML =
+    `<div class="stat"><span class="num">${tasks}</span> tasks found</div>` +
+    `<div class="stat"><span class="num">${s.wrBoxes.length}</span> WR boxes</div>` +
+    `<div class="stat"><span class="num">${s.iBoxes.length}</span> I boxes</div>` +
+    `<div class="stat">${s.signoffs.length > 0 ? 'Sign-off detected' : 'No sign-off'}</div>`;
+  document.getElementById('fresh-summary').style.display = '';
+  document.getElementById('btn-fresh').disabled = false;
+  log('log-fresh', `Found ${s.wrBoxes.length} WR, ${s.iBoxes.length} I, ${s.signoffs.length} sign-off sections`);
+});
+
+document.getElementById('btn-fresh').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-fresh');
+  btn.disabled = true;
+  btn.textContent = 'Processing...';
+
+  try {
+    const s = state.freshScan;
+    const wrVal = document.getElementById('fresh-wr').value;
+    const initials = document.getElementById('fresh-initials').value;
+    const nameVal = document.getElementById('fresh-name').value;
+    const signVal = document.getElementById('fresh-sign').value;
+    const dateVal = todayStr();
+
+    const wrVals = s.wrBoxes.map(() => wrVal);
+    const iVals = s.iBoxes.map(() => initials);
+
+    const result = await fillPdf(state.freshBytes, s, wrVals, iVals, nameVal, signVal, dateVal);
+    const outName = state.freshName.replace(/\.pdf$/i, '_filled.pdf');
+    download(result, outName);
+    log('log-fresh', 'Done! Downloaded: ' + outName);
+  } catch (e) {
+    log('log-fresh', 'Error: ' + e.message);
+    console.error(e);
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Fill & Download';
+});
+</script>
+</body>
+</html>
