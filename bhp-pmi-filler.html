@@ -240,7 +240,8 @@ function readFile(file) {
 
 // ─── PDF.js scanning ───
 async function scanPdf(bytes) {
-  const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+  const cleanBytes = ensurePdfHeader(bytes);
+  const pdf = await pdfjsLib.getDocument({ data: cleanBytes }).promise;
   const pages = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
@@ -368,8 +369,25 @@ function todayStr() {
          String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear();
 }
 
+function ensurePdfHeader(bytes) {
+  // Find %PDF header - some PDFs have leading whitespace or BOM
+  const header = [0x25, 0x50, 0x44, 0x46]; // %PDF
+  for (let i = 0; i < Math.min(bytes.length, 1024); i++) {
+    if (bytes[i] === header[0] && bytes[i+1] === header[1] &&
+        bytes[i+2] === header[2] && bytes[i+3] === header[3]) {
+      return i === 0 ? bytes : bytes.slice(i);
+    }
+  }
+  return bytes; // return as-is and let pdf-lib report the real error
+}
+
 async function fillPdf(targetBytes, targetScan, wrVals, iVals, nameVal, signVal, dateVal) {
-  const pdfDoc = await PDFDocument.load(targetBytes);
+  const cleanBytes = ensurePdfHeader(targetBytes);
+  const pdfDoc = await PDFDocument.load(cleanBytes, {
+    ignoreEncryption: true,
+    updateMetadata: false,
+    throwOnInvalidObject: false
+  });
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const fontItalic = await pdfDoc.embedFont(StandardFonts.HelveticaOblique);
