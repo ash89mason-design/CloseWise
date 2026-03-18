@@ -369,21 +369,32 @@ function todayStr() {
          String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear();
 }
 
-function ensurePdfHeader(bytes) {
-  // Find %PDF header - some PDFs have leading whitespace or BOM
+function ensurePdfHeader(bytes, logFn) {
+  // Search entire file for %PDF header
   const header = [0x25, 0x50, 0x44, 0x46]; // %PDF
-  for (let i = 0; i < Math.min(bytes.length, 1024); i++) {
+  if (logFn) {
+    const first20 = Array.from(bytes.slice(0, 20)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+    logFn('First 20 bytes: ' + first20);
+    const asText = new TextDecoder('utf-8', { fatal: false }).decode(bytes.slice(0, 40));
+    logFn('First 40 chars: ' + JSON.stringify(asText));
+  }
+  for (let i = 0; i < bytes.length; i++) {
     if (bytes[i] === header[0] && bytes[i+1] === header[1] &&
         bytes[i+2] === header[2] && bytes[i+3] === header[3]) {
+      if (logFn) logFn('%PDF header found at offset ' + i);
       return i === 0 ? bytes : bytes.slice(i);
     }
   }
-  return bytes; // return as-is and let pdf-lib report the real error
+  if (logFn) logFn('WARNING: No %PDF header found in file!');
+  return bytes;
 }
 
-async function fillPdf(targetBytes, targetScan, wrVals, iVals, nameVal, signVal, dateVal) {
-  const cleanBytes = ensurePdfHeader(targetBytes);
-  const pdfDoc = await PDFDocument.load(cleanBytes, {
+async function fillPdf(targetBytes, targetScan, wrVals, iVals, nameVal, signVal, dateVal, logFn) {
+  const cleanBytes = ensurePdfHeader(targetBytes, logFn);
+  if (logFn) logFn('Loading PDF with pdf-lib (' + cleanBytes.length + ' bytes)...');
+  // Try loading as ArrayBuffer copy (pdf-lib can be picky about typed array views)
+  const buffer = cleanBytes.buffer.slice(cleanBytes.byteOffset, cleanBytes.byteOffset + cleanBytes.byteLength);
+  const pdfDoc = await PDFDocument.load(buffer, {
     ignoreEncryption: true,
     updateMetadata: false,
     throwOnInvalidObject: false
@@ -544,7 +555,8 @@ document.getElementById('btn-copy').addEventListener('click', async () => {
       iVals.push(initials);
     }
 
-    const result = await fillPdf(state.blankBytes, bs, wrVals, iVals, nameVal, signVal, dateVal);
+    const logCopy = msg => log('log-copy', msg);
+    const result = await fillPdf(state.blankBytes, bs, wrVals, iVals, nameVal, signVal, dateVal, logCopy);
     const outName = state.blankName.replace(/\.pdf$/i, '_filled.pdf');
     download(result, outName);
     log('log-copy', 'Done! Downloaded: ' + outName);
@@ -593,7 +605,8 @@ document.getElementById('btn-fresh').addEventListener('click', async () => {
     const wrVals = s.wrBoxes.map(() => wrVal);
     const iVals = s.iBoxes.map(() => initials);
 
-    const result = await fillPdf(state.freshBytes, s, wrVals, iVals, nameVal, signVal, dateVal);
+    const logFresh = msg => log('log-fresh', msg);
+    const result = await fillPdf(state.freshBytes, s, wrVals, iVals, nameVal, signVal, dateVal, logFresh);
     const outName = state.freshName.replace(/\.pdf$/i, '_filled.pdf');
     download(result, outName);
     log('log-fresh', 'Done! Downloaded: ' + outName);
